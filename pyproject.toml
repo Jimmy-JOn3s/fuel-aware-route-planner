@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "django-pathfinder"
+version = "0.1.0"
+description = "Routing and fuel-optimization API with Django, PostGIS, Celery"
+authors = ["waiyanaung <dev@example.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+django = "^5.1.3"
+djangorestframework = "^3.15.2"
+django-cors-headers = "^4.3.1"
+celery = "^5.3.6"
+redis = "^5.0.1"
+psycopg = {extras = ["binary"], version = "^3.1.18"}
+requests = "^2.32.3"
+django-environ = "^0.11.2"
+drf-spectacular = "^0.27.2"
+geopy = "^2.4.1"
+gunicorn = "^23.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+pytest-django = "^4.8.0"
+black = "^24.10.0"
+isort = "^5.13.2"
+mypy = "^1.11.1"
+django-stubs = "^5.1.0"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
