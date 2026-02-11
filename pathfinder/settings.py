@@ -18,6 +18,11 @@ env = environ.Env(
     ORS_DIRECTIONS_URL=(str, "https://api.openrouteservice.org/v2/directions/driving-car"),
     MAPBOX_GEOCODING_BASE_URL=(str, "https://api.mapbox.com/geocoding/v5/mapbox.places"),
     ORS_GEOCODING_URL=(str, "https://api.openrouteservice.org/geocode/search"),
+    HTTP_TIMEOUT_SECONDS=(float, 3.0),
+    MAPBOX_DIRECTIONS_MAX_ATTEMPTS=(int, 2),
+    ORS_DIRECTIONS_MAX_ATTEMPTS=(int, 2),
+    MAPBOX_GEOCODE_MAX_ATTEMPTS=(int, 2),
+    ORS_GEOCODE_MAX_ATTEMPTS=(int, 2),
     INGEST_GEOCODE=(bool, True),
     VEHICLE_MAX_RANGE_MILES=(float, 500.0),
     VEHICLE_MPG=(str, "10"),
@@ -121,6 +126,11 @@ MAPBOX_DIRECTIONS_BASE_URL = env("MAPBOX_DIRECTIONS_BASE_URL")
 ORS_DIRECTIONS_URL = env("ORS_DIRECTIONS_URL")
 MAPBOX_GEOCODING_BASE_URL = env("MAPBOX_GEOCODING_BASE_URL")
 ORS_GEOCODING_URL = env("ORS_GEOCODING_URL")
+HTTP_TIMEOUT_SECONDS = env.float("HTTP_TIMEOUT_SECONDS", default=3.0)
+MAPBOX_DIRECTIONS_MAX_ATTEMPTS = env.int("MAPBOX_DIRECTIONS_MAX_ATTEMPTS", default=2)
+ORS_DIRECTIONS_MAX_ATTEMPTS = env.int("ORS_DIRECTIONS_MAX_ATTEMPTS", default=2)
+MAPBOX_GEOCODE_MAX_ATTEMPTS = env.int("MAPBOX_GEOCODE_MAX_ATTEMPTS", default=2)
+ORS_GEOCODE_MAX_ATTEMPTS = env.int("ORS_GEOCODE_MAX_ATTEMPTS", default=2)
 INGEST_GEOCODE = env.bool("INGEST_GEOCODE", default=True)
 VEHICLE_MAX_RANGE_MILES = env.float("VEHICLE_MAX_RANGE_MILES", default=500.0)
 VEHICLE_MPG = Decimal(env("VEHICLE_MPG", default="10"))

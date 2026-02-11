@@ -9,6 +9,7 @@ import redis
 from django.conf import settings
 
 _redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+_http = requests.Session()
 
 
 def _cache_key(address: str) -> str:
@@ -49,30 +50,34 @@ def geocode_address(address: str) -> Optional[Tuple[float, float]]:
 def _geocode_mapbox(address: str) -> Optional[Tuple[float, float]]:
     url = f"{settings.MAPBOX_GEOCODING_BASE_URL.rstrip('/')}/{address}.json"
     params = {"access_token": settings.MAPBOX_API_KEY, "limit": 1, "autocomplete": "false"}
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        if not resp.ok:
-            return None
-        data = resp.json()
-        feat = data.get("features", [])
-        if not feat:
-            return None
-        lon, lat = feat[0]["center"]
-        return float(lon), float(lat)
-    except Exception:
-        return None
+    for _ in range(max(1, settings.MAPBOX_GEOCODE_MAX_ATTEMPTS)):
+        try:
+            resp = _http.get(url, params=params, timeout=settings.HTTP_TIMEOUT_SECONDS)
+            if not resp.ok:
+                continue
+            data = resp.json()
+            feat = data.get("features", [])
+            if not feat:
+                return None
+            lon, lat = feat[0]["center"]
+            return float(lon), float(lat)
+        except Exception:
+            continue
+    return None
 
 
 def _geocode_ors(address: str) -> Optional[Tuple[float, float]]:
     url = settings.ORS_GEOCODING_URL
     params = {"api_key": settings.ORS_API_KEY, "text": address, "size": 1}
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        if not resp.ok:
-            return None
-        data = resp.json()
-        feat = data["features"][0]
-        lon, lat = feat["geometry"]["coordinates"]
-        return float(lon), float(lat)
-    except Exception:
-        return None
+    for _ in range(max(1, settings.ORS_GEOCODE_MAX_ATTEMPTS)):
+        try:
+            resp = _http.get(url, params=params, timeout=settings.HTTP_TIMEOUT_SECONDS)
+            if not resp.ok:
+                continue
+            data = resp.json()
+            feat = data["features"][0]
+            lon, lat = feat["geometry"]["coordinates"]
+            return float(lon), float(lat)
+        except Exception:
+            continue
+    return None

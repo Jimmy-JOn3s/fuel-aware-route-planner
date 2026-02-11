@@ -12,6 +12,7 @@ from ingest.models import FuelStation
 
 MILES_PER_GALLON = Decimal(str(settings.VEHICLE_MPG))
 MAX_RANGE_MILES = float(settings.VEHICLE_MAX_RANGE_MILES)
+_HTTP_SESSION = requests.Session()
 
 
 @dataclass
@@ -40,14 +41,18 @@ class RoutingClient:
             f"{start[0]},{start[1]};{end[0]},{end[1]}"
         )
         params = {"access_token": settings.MAPBOX_API_KEY, "geometries": "geojson"}
-        for attempt in range(3):
-            resp = requests.get(url, params=params, timeout=10)
+        last_response = None
+        for _ in range(max(1, settings.MAPBOX_DIRECTIONS_MAX_ATTEMPTS)):
+            resp = _HTTP_SESSION.get(url, params=params, timeout=settings.HTTP_TIMEOUT_SECONDS)
+            last_response = resp
             if resp.ok:
                 data = resp.json()
                 # Normalize to ORS-like shape
                 coords = data["routes"][0]["geometry"]["coordinates"]
                 return {"features": [{"geometry": {"coordinates": coords}}]}
-        resp.raise_for_status()
+        if last_response is not None:
+            last_response.raise_for_status()
+        raise ValueError("Mapbox directions call failed")
 
     def _directions_ors(self, start: Tuple[float, float], end: Tuple[float, float]) -> dict:
         url = settings.ORS_DIRECTIONS_URL
@@ -56,11 +61,15 @@ class RoutingClient:
             "start": f"{start[0]},{start[1]}",
             "end": f"{end[0]},{end[1]}",
         }
-        for attempt in range(3):
-            resp = requests.get(url, params=params, timeout=10)
+        last_response = None
+        for _ in range(max(1, settings.ORS_DIRECTIONS_MAX_ATTEMPTS)):
+            resp = _HTTP_SESSION.get(url, params=params, timeout=settings.HTTP_TIMEOUT_SECONDS)
+            last_response = resp
             if resp.ok:
                 return resp.json()
-        resp.raise_for_status()
+        if last_response is not None:
+            last_response.raise_for_status()
+        raise ValueError("ORS directions call failed")
 
 
 def haversine_miles(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:

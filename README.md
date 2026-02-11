@@ -95,3 +95,29 @@ API service for cost-aware routing and fuel-stop optimization in the USA.
 - `ORS_DIRECTIONS_URL` (default ORS driving-car directions endpoint)
 - `MAPBOX_GEOCODING_BASE_URL` (default Mapbox places geocoding endpoint)
 - `ORS_GEOCODING_URL` (default ORS geocode search endpoint)
+- `HTTP_TIMEOUT_SECONDS` (request timeout for map/geocode calls)
+- `MAPBOX_DIRECTIONS_MAX_ATTEMPTS` / `ORS_DIRECTIONS_MAX_ATTEMPTS`
+- `MAPBOX_GEOCODE_MAX_ATTEMPTS` / `ORS_GEOCODE_MAX_ATTEMPTS`
+
+## Cold-call performance improvement
+- Baseline observation: cold route requests were around **~4.0s**.
+- Current observation after tuning: cold route requests around **~900ms**.
+
+### What changed
+- Mapbox kept as primary provider for interactive route/geocode calls.
+- HTTP connection reuse enabled with shared `requests.Session` (removes repeated TCP/TLS setup overhead).
+- Timeout/retry behavior tightened and moved to env config:
+  - lower request timeout budget,
+  - max attempts capped (`2`) for both Mapbox and ORS paths.
+- ORS remains fallback-capable, but retry depth is constrained to reduce long-tail latency.
+
+### Why latency improved
+- Most cold-path delay was external API/network overhead.
+- Reused connections + tighter timeout/retry limits reduced waiting on slow upstream responses.
+- Existing Redis/Postgres warm-cache effects continue to improve subsequent calls.
+
+### Trade-offs and rationale
+- **Trade-off:** lower timeout and capped retries can increase failed requests during provider/network instability.
+- **Trade-off:** stronger preference for Mapbox can reduce resilience if Mapbox has an incident (ORS fallback still exists but with limited retries).
+- **Trade-off:** aggressive latency tuning prioritizes responsiveness over exhaustive retry persistence.
+- **Why this was chosen:** the main bottleneck was cold-path upstream latency, so this approach delivered the largest latency reduction with minimal code complexity and no algorithm/data-model changes.
