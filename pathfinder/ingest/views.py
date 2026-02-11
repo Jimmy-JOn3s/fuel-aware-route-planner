@@ -3,8 +3,11 @@ from typing import Any
 from pathlib import Path
 
 from django.http import FileResponse, HttpRequest
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiResponse, extend_schema, inline_serializer
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
+from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -19,6 +22,22 @@ logger = logging.getLogger(__name__)
 class IngestionUploadView(APIView):
     parser_classes = [MultiPartParser]
 
+    @extend_schema(
+        request=inline_serializer(
+            name="IngestionUploadRequest",
+            fields={"file": serializers.FileField()},
+        ),
+        responses={
+            200: inline_serializer(
+                name="IngestionUploadResponse",
+                fields={
+                    "ingestion_id": serializers.IntegerField(),
+                    "status": serializers.CharField(),
+                },
+            ),
+            400: OpenApiResponse(description="file is required"),
+        },
+    )
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Response:
         upload = request.FILES.get("file")
         if not upload:
@@ -40,12 +59,21 @@ class IngestionUploadView(APIView):
 
 
 class IngestionStatusView(APIView):
+    @extend_schema(responses={200: IngestionSerializer})
     def get(self, request: HttpRequest, pk: int, *args: Any, **kwargs: Any) -> Response:
         ingestion = Ingestion.objects.get(pk=pk)
         return Response(IngestionSerializer(ingestion).data)
 
 
 class IngestionDownloadView(APIView):
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                response=OpenApiTypes.BINARY,
+                description="Fuel prices CSV download",
+            )
+        }
+    )
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> FileResponse:
         response = FileResponse(open("fuel-prices-for-be-assessment.csv", "rb"))
         response["Content-Disposition"] = "attachment; filename=fuel-prices.csv"

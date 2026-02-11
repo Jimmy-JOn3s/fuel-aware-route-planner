@@ -3,11 +3,12 @@ from typing import Any
 
 from django.contrib.gis.geos import Point
 from django.http import HttpRequest
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import RouteRequestSerializer
+from .serializers import RouteRequestSerializer, RouteResponseSerializer
 from .services import compute_route
 from .models import Route
 import logging
@@ -17,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 class RouteView(APIView):
+    @extend_schema(
+        request=RouteRequestSerializer,
+        responses={
+            200: RouteResponseSerializer,
+            400: OpenApiResponse(description="Validation or infeasible-route error"),
+        },
+    )
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Response:
         t0 = time.perf_counter()
         serializer = RouteRequestSerializer(data=request.data)
