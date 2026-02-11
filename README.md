@@ -1,123 +1,113 @@
 # Pathfinder Fuel Optimization Route
 
-API service for cost-aware routing and fuel-stop optimization in the USA.
+Cost-aware routing API for US trips.  
+Returns route geometry, fuel stops, gallons, and total fuel cost.
 
-## What the system does
-- Accepts start and end locations.
-- Fetches a drivable route from a map provider.
-- Selects stations near the route corridor.
-- Applies a configurable vehicle range constraint.
-- Computes fuel stops and total fuel cost with configurable MPG.
-- Returns route geometry, stop list, gallons, and total cost.
+## TL;DR
+- Stack: Django + DRF, Postgres/PostGIS, Redis, Celery, Mapbox (primary), ORS (fallback/batch).
+- Routing optimization: Dijkstra on a fuel-cost graph with max-range constraints.
+- Ingest supports daily CSV refresh via async upload route.
+- Geocoding supports fast-load (`geom=NULL`) + progressive background backfill.
+- Cold route latency improved from ~4.0s to ~900ms after HTTP/provider tuning.
 
-## High-level architecture
-- **Django API (web):** request validation, routing orchestration, response shaping.
-- **Postgres + PostGIS:** persistent station data, geospatial queries, route history.
-- **Redis:** Celery broker and cache for geocode/route responses.
-- **Celery worker:** asynchronous ingestion and background geocoding tasks.
-- **Mapbox:** on-demand geocoding and routing for interactive speed.
-- **OpenRouteService (ORS):** batch geocoding/backfill path.
+## API docs
+- Swagger UI: `http://localhost:8000/api/docs/`
+- OpenAPI schema: `http://localhost:8000/api/schema/`
 
+## Local setup
+1. `cp .env.example .env`
+2. Set keys in `.env`:
+   - `MAPBOX_API_KEY=...`
+   - `ORS_API_KEY=...` (optional)
+3. Start services: `docker compose up --build -d`
+4. Upload dataset: `POST /api/ingest/upload/` with multipart field `file`
 
-## Design choices and trade-offs
-### Why Postgres + PostGIS over MongoDB
-- Geospatial routing logic depends on SQL spatial operators (`ST_DWithin`, indexed distance filters) that PostGIS provides natively and efficiently.
-- Station ingestion, deduplication, and route-history persistence fit relational constraints well (unique keys, transactions, typed decimals for fuel prices).
-- Query planner + GiST/SP-GiST spatial indexes provide predictable performance for corridor filtering at scale.
-- MongoDB geospatial features are useful, but this workload benefits more from relational joins, strict schema guarantees, and PostGIS geometry tooling.
+## Core routes
+- `POST /api/ingest/upload/` - async CSV ingestion
+- `GET /api/ingest/status/{id}/` - ingestion status
+- `POST /api/route/` - route + fuel optimization
 
-### Why Redis
-- Celery broker: reliable async task handoff for ingestion and background geocoding.
-- Cache layer: low-latency lookup for repeated geocode and route requests, reducing external API calls and p95 response time.
-- TTL-based cache expiry keeps data fresh while controlling memory growth.
+## Architecture overview
+- **Web API**: request validation, routing orchestration, persistence.
+- **Postgres + PostGIS**: stations, geospatial filtering (`ST_DWithin`), route history.
+- **Redis**: Celery broker + cache.
+- **Celery worker**: ingest and geocode background jobs.
+- **Mapbox**: primary on-demand directions/geocode.
+- **ORS**: fallback/batch geocode path.
 
-### Architecture decisions
-- Monolith-first service layout (web + worker) keeps delivery simple and maintainable while still demonstrating production patterns (async jobs, caching, geospatial DB).
-- Fast ingest-first strategy loads CSV quickly; geocoding can run progressively in background to avoid blocking usability.
-- On-demand routing uses one primary directions call and local optimization (Dijkstra) to stay within free-tier API limits.
-- Route responses are persisted with timestamps for traceability, replay, and debugging.
+## Why these choices
+- **Postgres/PostGIS over MongoDB**: stronger spatial SQL/indexing, relational constraints, deterministic decimal handling for price/cost.
+- **Redis**: low-latency cache plus durable async task handoff.
+- **Monolith-first layout (web + worker)**: simpler delivery while still showing production patterns (async jobs, cache, geospatial DB).
 
-## End-to-end flow
-1. CSV ingestion loads fuel stations into Postgres.
-2. Route request arrives with `start` and `end`.
-3. API obtains route polyline from provider.
-4. PostGIS filters stations within corridor distance of the route.
-5. Graph is built with edge feasibility based on configured max leg distance.
-6. Dijkstra finds the minimum fuel-cost path.
-7. API returns route, fuel stops, gallons, and total cost.
-8. Route response is cached in Redis for repeat lookups.
+## File upload + progressive geocode
+- Upload endpoint is suitable for daily price-file changes.
+- Processing is async: upload -> ingestion record -> Redis queue -> worker upsert.
+- Geocode mode is env-switchable:
+  - `INGEST_GEOCODE=False`: fastest ingest, allows `geom=NULL`.
+  - `INGEST_GEOCODE=True`: geocode while ingesting (slower, can hit basic-tier rate limits).
 
-## Dijkstra fuel-optimization flow
-- Candidate nodes are created from:
-  - virtual `start` node,
-  - virtual `end` node,
-  - fuel stations near the route corridor (`ST_DWithin`).
-- Directed edge `A -> B` is created only when:
-  - `distance(A, B) <= VEHICLE_MAX_RANGE_MILES`.
-- Edge fuel cost is computed as:
-  - `gallons_for_leg = distance(A, B) / VEHICLE_MPG`
-  - `leg_cost = gallons_for_leg * price_at_node_A`
-- Dijkstra runs on this weighted graph to minimize total fuel cost from `start` to `end`.
-- Total gallons are computed from full selected path distance:
-  - `total_gallons = total_path_miles / VEHICLE_MPG`.
-- For trips where direct start-to-end distance is within range, direct path is used and `fuel_stops` remains empty while cost is still returned.
+### Backfill behavior (technical)
+- Worker task: `geocode_pending(batch_size=5000)` (tunable).
+- Selector: `FuelStation.objects.filter(geom__isnull=True)[:batch_size]`.
+- Per-row flow: normalize address -> geocode -> update `geom` on success.
+- Failed rows remain null and are retried in later batches.
+- Already geocoded rows are skipped by filter (idempotent repeated runs).
+- Result: fast initial availability + progressive convergence to full geocode coverage.
 
-### Parameter impact
-- `VEHICLE_MAX_RANGE_MILES`
-  - lower value: fewer reachable edges, more stops, possible no-path cases.
-  - higher value: more reachable edges, fewer stops, often lower total cost.
-- `VEHICLE_MPG`
-  - higher value: lower gallons and lower total cost.
-  - lower value: higher gallons and higher total cost.
+## Routing algorithm
+- Build candidate nodes: virtual `start`, virtual `end`, and corridor stations.
+- Add edge `A -> B` only if `distance(A,B) <= VEHICLE_MAX_RANGE_MILES`.
+- Edge cost: `distance(A,B) / VEHICLE_MPG * price_at_A`.
+- Run Dijkstra to minimize total fuel cost.
+- For trips within max range, direct path is used and `fuel_stops` can be empty while cost remains non-zero.
 
-## Background jobs and freshness model
-- Background geocoding tasks continuously fill missing station coordinates (`geom`).
-- Backfill runs in batches to respect API quotas and avoid request spikes.
-- Cache keys include location/request signatures and TTL controls to prevent stale growth.
-- Route history is stored with timestamps for audit and replay.
-- If provider roads, traffic models, or geometry change, fresh requests re-query routing APIs and refresh cached responses.
-- If route coverage expands into new areas, nightly/backfill jobs geocode newly relevant stations so stop selection remains accurate.
+## Configuration reference
 
-## Why background jobs exist
-- Interactive API latency stays low by moving heavy enrichment outside request time.
-- Large CSV datasets become usable quickly even before full geocode completion.
-- Progressive enrichment improves stop quality over time without blocking route responses.
-- Scheduled refresh keeps station coverage aligned with evolving route patterns.
+### Vehicle + optimization
+- `VEHICLE_MAX_RANGE_MILES` - maximum drivable distance per leg before refuel (default: `500`)
+- `VEHICLE_MPG` - fuel efficiency used in cost math (default: `10`)
 
-## Core constraints implemented
-- Vehicle max range: `VEHICLE_MAX_RANGE_MILES` (default `500`).
-- Fuel economy: `VEHICLE_MPG` (default `10`).
-- Fuel prices sourced from uploaded CSV dataset.
-- External routing API usage minimized and cached.
+### Provider selection + endpoints
+- `MAPBOX_API_KEY` - primary provider key for on-demand route/geocode
+- `ORS_API_KEY` - fallback/batch provider key
+- `MAPBOX_DIRECTIONS_BASE_URL` - Mapbox directions endpoint
+- `ORS_DIRECTIONS_URL` - ORS directions endpoint
+- `MAPBOX_GEOCODING_BASE_URL` - Mapbox geocoding endpoint
+- `ORS_GEOCODING_URL` - ORS geocoding endpoint
 
-## Provider endpoint configuration
-- `MAPBOX_DIRECTIONS_BASE_URL` (default Mapbox driving directions endpoint)
-- `ORS_DIRECTIONS_URL` (default ORS driving-car directions endpoint)
-- `MAPBOX_GEOCODING_BASE_URL` (default Mapbox places geocoding endpoint)
-- `ORS_GEOCODING_URL` (default ORS geocode search endpoint)
-- `HTTP_TIMEOUT_SECONDS` (request timeout for map/geocode calls)
-- `MAPBOX_DIRECTIONS_MAX_ATTEMPTS` / `ORS_DIRECTIONS_MAX_ATTEMPTS`
-- `MAPBOX_GEOCODE_MAX_ATTEMPTS` / `ORS_GEOCODE_MAX_ATTEMPTS`
+### Ingest + geocode behavior
+- `INGEST_GEOCODE=false` - fastest CSV load; allows `geom=NULL` and backfills later
+- `INGEST_GEOCODE=true` - geocodes during ingest; can be slower/rate-limited on basic tiers
 
-## Cold-call performance improvement
-- Baseline observation: cold route requests were around **~4.0s**.
-- Current observation after tuning: cold route requests around **~900ms**.
+### HTTP performance tuning
+- `HTTP_TIMEOUT_SECONDS` - per-call timeout budget (default: `3`)
+- `MAPBOX_DIRECTIONS_MAX_ATTEMPTS` - retry budget for Mapbox directions (default: `2`)
+- `ORS_DIRECTIONS_MAX_ATTEMPTS` - retry budget for ORS directions (default: `2`)
+- `MAPBOX_GEOCODE_MAX_ATTEMPTS` - retry budget for Mapbox geocode (default: `2`)
+- `ORS_GEOCODE_MAX_ATTEMPTS` - retry budget for ORS geocode (default: `2`)
 
-### What changed
-- Mapbox kept as primary provider for interactive route/geocode calls.
-- HTTP connection reuse enabled with shared `requests.Session` (removes repeated TCP/TLS setup overhead).
-- Timeout/retry behavior tightened and moved to env config:
-  - lower request timeout budget,
-  - max attempts capped (`2`) for both Mapbox and ORS paths.
-- ORS remains fallback-capable, but retry depth is constrained to reduce long-tail latency.
+### Example env block
+```env
+MAPBOX_API_KEY=your_mapbox_key
+ORS_API_KEY=your_ors_key
 
-### Why latency improved
-- Most cold-path delay was external API/network overhead.
-- Reused connections + tighter timeout/retry limits reduced waiting on slow upstream responses.
-- Existing Redis/Postgres warm-cache effects continue to improve subsequent calls.
+VEHICLE_MAX_RANGE_MILES=500
+VEHICLE_MPG=10
+INGEST_GEOCODE=False
 
-### Trade-offs and rationale
-- **Trade-off:** lower timeout and capped retries can increase failed requests during provider/network instability.
-- **Trade-off:** stronger preference for Mapbox can reduce resilience if Mapbox has an incident (ORS fallback still exists but with limited retries).
-- **Trade-off:** aggressive latency tuning prioritizes responsiveness over exhaustive retry persistence.
-- **Why this was chosen:** the main bottleneck was cold-path upstream latency, so this approach delivered the largest latency reduction with minimal code complexity and no algorithm/data-model changes.
+HTTP_TIMEOUT_SECONDS=3
+MAPBOX_DIRECTIONS_MAX_ATTEMPTS=2
+ORS_DIRECTIONS_MAX_ATTEMPTS=2
+MAPBOX_GEOCODE_MAX_ATTEMPTS=2
+ORS_GEOCODE_MAX_ATTEMPTS=2
+```
+
+## Performance notes
+- Baseline cold route: ~4.0s.
+- Current cold route: ~900ms (observed).
+- Changes:
+  - Mapbox kept as primary path.
+  - Shared `requests.Session` for connection reuse.
+  - Timeout/retry capped via env (default attempts = 2).
+- Trade-off: tighter timeout/retry can increase failure probability during upstream instability, but reduces latency tail.
