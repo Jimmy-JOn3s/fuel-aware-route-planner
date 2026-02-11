@@ -21,11 +21,49 @@ Returns route geometry, fuel stops, gallons, and total fuel cost.
    - `ORS_API_KEY=...` (optional)
 3. Start services: `docker compose up --build -d`
 4. Upload dataset: `POST /api/ingest/upload/` with multipart field `file`
+5. If `INGEST_GEOCODE=False`, run one progressive backfill loop (batch + sleep):
+   - `docker compose exec web python /app/pathfinder/manage.py shell -c "import time; from ingest.tasks import geocode_pending; total=0; batch=500; sleep_s=1; print(f'start batch={batch} sleep={sleep_s}s');\nwhile True:\n    n=geocode_pending(batch_size=batch)\n    total+=n\n    print(f'updated={n} total={total}')\n    if n==0:\n        break\n    time.sleep(sleep_s)\nprint('done')"`
+   - recommended starter values for basic-tier safety (`batch=400`, `sleep_s=2`):  
+     `docker compose exec web python /app/pathfinder/manage.py shell -c "import time; from ingest.tasks import geocode_pending; total=0; batch=400; sleep_s=2; print(f'start batch={batch} sleep={sleep_s}s');\nwhile True:\n    n=geocode_pending(batch_size=batch)\n    total+=n\n    print(f'updated={n} total={total}')\n    if n==0:\n        break\n    time.sleep(sleep_s)\nprint('done')"`
+6. Check geocode progress:
+   - `docker compose exec db psql -U pathfinder -d pathfinder -c "SELECT COUNT(*) AS total, COUNT(geom) AS geocoded, COUNT(*)-COUNT(geom) AS remaining_null FROM ingest_fuelstation;"`
 
 ## Core routes
 - `POST /api/ingest/upload/` - async CSV ingestion
 - `GET /api/ingest/status/{id}/` - ingestion status
 - `POST /api/route/` - route + fuel optimization
+
+## Tests (unit, API, BDD, business rules)
+
+### Run test suite
+- `docker compose exec web pytest -q`
+
+### Current coverage by file
+- `tests/test_routing.py` (unit tests)
+  - `haversine_miles` zero-distance behavior
+  - graph range constraints in `build_graph`
+  - shortest-path selection in `dijkstra`
+
+- `tests/test_ingest_tasks.py` (unit + task behavior)
+  - price parsing/quantization (`parse_price`)
+  - ingest happy path updates station + marks ingestion success
+  - ingest failure path marks ingestion failed with error detail
+
+- `tests/test_ingest_api.py` (API + BDD style)
+  - missing file returns `400`
+  - upload queues Celery task and creates ingestion record
+  - status endpoint returns expected ingestion payload
+  - BDD scenario: given missing file, when upload called, then `400`
+
+- `tests/test_routing_api.py` (API + BDD style)
+  - happy path returns route payload and persists route record
+  - validation failures for bad coordinates / missing fields
+  - BDD scenario: given valid coordinates, when route requested, then optimized payload
+  - BDD scenario: given unreachable route, when requested, then `400` with feasibility message
+
+- `tests/test_routing_business_logic.py` (business-logic focus)
+  - short trip under max range: no stops but non-zero gallons/cost
+  - unreachable trip under strict range: raises `ValueError` for infeasible route
 
 ## Architecture overview
 - **Web API**: request validation, routing orchestration, persistence.

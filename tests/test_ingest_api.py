@@ -49,3 +49,16 @@ def test_ingest_status_returns_payload():
     body = response.json()
     assert body["id"] == ingestion.id
     assert body["status"] == Ingestion.Status.SUCCESS
+
+
+@pytest.mark.django_db
+def test_bdd_given_missing_file_when_upload_called_then_returns_400():
+    # Given: ingest API is available.
+    client = APIClient()
+
+    # When: upload is called without multipart "file".
+    response = client.post("/api/ingest/upload/", data={}, format="multipart")
+
+    # Then: request is rejected with clear validation error.
+    assert response.status_code == 400
+    assert response.json()["detail"] == "file is required"

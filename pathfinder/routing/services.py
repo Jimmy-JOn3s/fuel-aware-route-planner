@@ -186,7 +186,12 @@ def compute_route(start_point: Point, end_point: Point) -> dict:
     graph = build_graph(nodes)
     path_ids = dijkstra(graph, start_node.id, end_node.id)
     if not path_ids:
-        path_ids = [start_node.id, end_node.id]
+        if direct_distance <= MAX_RANGE_MILES:
+            path_ids = [start_node.id, end_node.id]
+        else:
+            raise ValueError(
+                "No feasible route found within VEHICLE_MAX_RANGE_MILES; increase range or adjust points"
+            )
     # For trips that fit in one tank, avoid synthetic intermediate stops.
     if direct_distance <= MAX_RANGE_MILES:
         path_ids = [start_node.id, end_node.id]

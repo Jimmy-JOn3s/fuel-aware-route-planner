@@ -39,7 +39,10 @@ class RouteView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        payload = compute_route(start_point, end_point)
+        try:
+            payload = compute_route(start_point, end_point)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         payload["static_map_url"] = ""
 
         Route.objects.create(
