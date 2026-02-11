@@ -14,6 +14,10 @@ env = environ.Env(
     REDIS_URL=(str, "redis://localhost:6379/0"),
     ORS_API_KEY=(str, ""),
     MAPBOX_API_KEY=(str, ""),
+    MAPBOX_DIRECTIONS_BASE_URL=(str, "https://api.mapbox.com/directions/v5/mapbox/driving"),
+    ORS_DIRECTIONS_URL=(str, "https://api.openrouteservice.org/v2/directions/driving-car"),
+    MAPBOX_GEOCODING_BASE_URL=(str, "https://api.mapbox.com/geocoding/v5/mapbox.places"),
+    ORS_GEOCODING_URL=(str, "https://api.openrouteservice.org/geocode/search"),
     INGEST_GEOCODE=(bool, True),
     VEHICLE_MAX_RANGE_MILES=(float, 500.0),
     VEHICLE_MPG=(str, "10"),
@@ -113,6 +117,10 @@ CELERY_TASK_SOFT_TIME_LIMIT = 60 * 8
 
 ORS_API_KEY = env("ORS_API_KEY")
 MAPBOX_API_KEY = env("MAPBOX_API_KEY")
+MAPBOX_DIRECTIONS_BASE_URL = env("MAPBOX_DIRECTIONS_BASE_URL")
+ORS_DIRECTIONS_URL = env("ORS_DIRECTIONS_URL")
+MAPBOX_GEOCODING_BASE_URL = env("MAPBOX_GEOCODING_BASE_URL")
+ORS_GEOCODING_URL = env("ORS_GEOCODING_URL")
 INGEST_GEOCODE = env.bool("INGEST_GEOCODE", default=True)
 VEHICLE_MAX_RANGE_MILES = env.float("VEHICLE_MAX_RANGE_MILES", default=500.0)
 VEHICLE_MPG = Decimal(env("VEHICLE_MPG", default="10"))

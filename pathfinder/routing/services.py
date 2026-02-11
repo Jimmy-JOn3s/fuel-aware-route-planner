@@ -9,7 +9,6 @@ import requests
 from django.conf import settings
 from django.contrib.gis.geos import LineString, Point
 from ingest.models import FuelStation
-from pathfinder.geocode import geocode_address
 
 MILES_PER_GALLON = Decimal(str(settings.VEHICLE_MPG))
 MAX_RANGE_MILES = float(settings.VEHICLE_MAX_RANGE_MILES)
@@ -37,7 +36,7 @@ class RoutingClient:
 
     def _directions_mapbox(self, start: Tuple[float, float], end: Tuple[float, float]) -> dict:
         url = (
-            f"https://api.mapbox.com/directions/v5/mapbox/driving/"
+            f"{settings.MAPBOX_DIRECTIONS_BASE_URL.rstrip('/')}/"
             f"{start[0]},{start[1]};{end[0]},{end[1]}"
         )
         params = {"access_token": settings.MAPBOX_API_KEY, "geometries": "geojson"}
@@ -51,7 +50,7 @@ class RoutingClient:
         resp.raise_for_status()
 
     def _directions_ors(self, start: Tuple[float, float], end: Tuple[float, float]) -> dict:
-        url = "https://api.openrouteservice.org/v2/directions/driving-car"
+        url = settings.ORS_DIRECTIONS_URL
         params = {
             "api_key": settings.ORS_API_KEY,
             "start": f"{start[0]},{start[1]}",

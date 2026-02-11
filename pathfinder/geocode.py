@@ -47,7 +47,7 @@ def geocode_address(address: str) -> Optional[Tuple[float, float]]:
 
 
 def _geocode_mapbox(address: str) -> Optional[Tuple[float, float]]:
-    url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{address}.json"
+    url = f"{settings.MAPBOX_GEOCODING_BASE_URL.rstrip('/')}/{address}.json"
     params = {"access_token": settings.MAPBOX_API_KEY, "limit": 1, "autocomplete": "false"}
     try:
         resp = requests.get(url, params=params, timeout=10)
@@ -64,7 +64,7 @@ def _geocode_mapbox(address: str) -> Optional[Tuple[float, float]]:
 
 
 def _geocode_ors(address: str) -> Optional[Tuple[float, float]]:
-    url = "https://api.openrouteservice.org/geocode/search"
+    url = settings.ORS_GEOCODING_URL
     params = {"api_key": settings.ORS_API_KEY, "text": address, "size": 1}
     try:
         resp = requests.get(url, params=params, timeout=10)
